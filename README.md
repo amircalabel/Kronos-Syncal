@@ -1,8 +1,3 @@
-Aquí tienes un `README.md` completo y detallado para **Kronos-Syncal**, listo para copiar y pegar en tu repositorio de GitHub.
-
----
-
-```markdown
 # Kronos-Syncal
 
 **Kronos-Syncal** es un calendario distribuido y offline-first construido con FastAPI, SQLite y CRDTs. Permite crear eventos, gestionar invitaciones y consultar disponibilidad incluso sin conexión, sincronizando cambios entre nodos mediante ZeroMQ y resolviendo conflictos de forma automática.
