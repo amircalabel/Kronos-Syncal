@@ -1,0 +1,1 @@
+# CRDT logic for conflict-free event synchronization.
