@@ -1,0 +1,119 @@
+<!doctype html>
+<html lang="es">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Kronos-Syncal</title>
+    <style>
+      :root { color-scheme: light; font-family: system-ui, sans-serif; color: #172033; background: #f3f5f9; }
+      body { max-width: 900px; margin: 0 auto; padding: 1.5rem; }
+      header, section, article { background: white; border-radius: 12px; padding: 1.25rem; margin-bottom: 1rem; }
+      h1, h2 { margin-top: 0; }
+      label { display: grid; gap: .35rem; margin: .75rem 0; font-weight: 600; }
+      input, select, textarea, button { box-sizing: border-box; font: inherit; padding: .65rem; border: 1px solid #cbd2df; border-radius: 7px; }
+      button { cursor: pointer; background: #244fca; color: white; border: 0; margin: .3rem .3rem 0 0; }
+      button.secundario { background: #58657b; }
+      .acciones { display: flex; flex-wrap: wrap; gap: .5rem; }
+      .error { color: #a32121; }
+      .mensaje { color: #17643b; }
+      .evento { border: 1px solid #e1e5ed; }
+      .evento h3 { margin: 0 0 .4rem; }
+      .meta { color: #526078; }
+      @media (min-width: 650px) { .dos-columnas { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; } }
+    </style>
+    <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
+    <script defer src="/static/app.js"></script>
+  </head>
+  <body>
+    <main x-data="calendarioApp()" x-init="cargar()">
+      <header>
+        <h1>Kronos-Syncal</h1>
+        <p>Tu calendario local, listo para sincronizarse con otros nodos.</p>
+      </header>
+
+      <section>
+        <h2 x-text="form.id ? 'Editar evento' : 'Crear evento'"></h2>
+        <form @submit.prevent="crear">
+          <label>
+            Título
+            <input x-model="form.titulo" type="text" maxlength="500" required>
+          </label>
+          <label>
+            Descripción
+            <textarea x-model="form.descripcion" rows="2"></textarea>
+          </label>
+          <div class="dos-columnas">
+            <label>
+              Inicio
+              <input x-model="form.inicio" type="datetime-local" required>
+            </label>
+            <label>
+              Fin
+              <input x-model="form.fin" type="datetime-local" required>
+            </label>
+          </div>
+          <label>
+            Calendario
+            <select x-model="form.calendario_id" required>
+              <template x-for="calendario in calendarios" :key="calendario.id">
+                <option :value="calendario.id" x-text="calendario.nombre"></option>
+              </template>
+            </select>
+          </label>
+          <label>
+            <span>Evento de todo el día</span>
+            <input x-model="form.todo_el_dia" type="checkbox">
+          </label>
+          <div class="acciones">
+            <button type="submit" x-text="form.id ? 'Guardar cambios' : 'Crear evento'"></button>
+            <button
+              x-show="form.id"
+              class="secundario"
+              type="button"
+              @click="limpiarFormulario()"
+            >Cancelar edición</button>
+          </div>
+        </form>
+      </section>
+
+      <section>
+        <h2>Eventos</h2>
+        <template x-if="eventos.length === 0">
+          <p>No hay eventos para mostrar.</p>
+        </template>
+        <template x-for="evento in eventos" :key="evento.id">
+          <article class="evento">
+            <h3 x-text="evento.titulo"></h3>
+            <p x-text="evento.descripcion"></p>
+            <p class="meta">
+              <span x-text="new Date(evento.inicio).toLocaleString('es')"></span>
+              –
+              <span x-text="new Date(evento.fin).toLocaleString('es')"></span>
+              · <span x-text="evento.estado"></span>
+            </p>
+            <div class="acciones">
+              <button type="button" @click="editar(evento)">Editar</button>
+              <button class="secundario" type="button" @click="eliminar(evento.id)">Eliminar</button>
+            </div>
+          </article>
+        </template>
+      </section>
+
+      <section>
+        <h2>Sincronizar</h2>
+        <label>
+          URL o dirección del nodo remoto
+          <input
+            x-model="nodoRemoto"
+            type="text"
+            placeholder="http://localhost:8001 o localhost:5555"
+          >
+        </label>
+        <button type="button" @click="sincronizar()">Enviar cambios</button>
+      </section>
+
+      <p class="error" role="alert" x-show="error" x-text="error"></p>
+      <p class="mensaje" role="status" x-show="mensaje" x-text="mensaje"></p>
+    </main>
+  </body>
+</html>
