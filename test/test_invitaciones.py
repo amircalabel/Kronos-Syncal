@@ -1,4 +1,3 @@
-from datetime import datetime
 from uuid import uuid4
 
 import pytest
@@ -13,7 +12,13 @@ def client():
         yield test_client
 
 
-def crear_evento(client, *, creador=None, inicio="2035-01-01T10:00:00", fin="2035-01-01T11:00:00"):
+def crear_evento(
+    client,
+    *,
+    creador=None,
+    inicio="2035-01-01T10:00:00",
+    fin="2035-01-01T11:00:00",
+):
     respuesta = client.post(
         "/api/eventos",
         json={

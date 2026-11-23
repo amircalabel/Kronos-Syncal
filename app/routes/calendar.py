@@ -301,6 +301,8 @@ def actualizar_evento(
             status_code=409,
             detail="Se requiere al menos una invitación aceptada para confirmar el evento",
         )
+    if "participantes" in valores:
+        valores["participantes"] = list(dict.fromkeys(valores["participantes"]))
     if "inicio" in valores:
         valores["inicio"] = _sin_zona(valores["inicio"])
     if "fin" in valores:
@@ -317,6 +319,18 @@ def actualizar_evento(
     actualizar_evento_crdt(doc, valores, ahora.replace(tzinfo=timezone.utc).isoformat())
     _aplicar_campos(evento, doc_a_dict(doc))
     evento.crdt_data = doc_a_dict(doc)
+    if "participantes" in valores:
+        usuarios = set(evento.participantes or [])
+        invitaciones = {
+            invitacion.usuario: invitacion
+            for invitacion in db.query(Invitacion)
+            .filter(Invitacion.evento_id == evento_id)
+            .all()
+        }
+        for usuario in usuarios - invitaciones.keys():
+            db.add(Invitacion(evento_id=evento_id, usuario=usuario))
+        for usuario in invitaciones.keys() - usuarios:
+            db.delete(invitaciones[usuario])
     db.commit()
     db.refresh(evento)
     return evento
@@ -331,7 +345,6 @@ def invitar_participantes(
         raise HTTPException(status_code=404, detail="Evento no encontrado")
 
     participantes = list(evento.participantes or [])
-    nuevos = []
     for usuario in datos.participantes:
         invitacion = (
             db.query(Invitacion)
@@ -343,7 +356,6 @@ def invitar_participantes(
         )
         if invitacion is None:
             db.add(Invitacion(evento_id=evento_id, usuario=usuario))
-            nuevos.append(usuario)
         if usuario not in participantes:
             participantes.append(usuario)
     evento.participantes = participantes
