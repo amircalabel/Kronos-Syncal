@@ -3,6 +3,7 @@
 ## Qué se hizo
 
 `Calendario` registra nombre y propietario. `Evento` conserva título, descripción, fechas, estado, participantes, versión, calendario asociado y los registros CRDT serializados como JSON. `EventoTombstone` identifica una eliminación, quién la realizó y cuándo ocurrió. Las fechas se almacenan en SQLite como UTC sin zona horaria.
+`Usuario` identifica cuentas mediante `email` como clave primaria, conserva `nombre` y el identificador único de Google `google_sub`. `Evento` incluye `rrule`, `exdates` y `visibilidad` (`publico`, `privado` o `solo_invitados`).
 
 ## Por qué se hizo así
 

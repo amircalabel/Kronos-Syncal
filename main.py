@@ -8,6 +8,9 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from starlette.middleware.sessions import SessionMiddleware
+from dotenv import load_dotenv
+
+load_dotenv()
 
 from app.database import Base, asegurar_columnas_compatibilidad, engine
 from app.models import Calendario, Evento, EventoTombstone, Invitacion, Usuario  # noqa: F401

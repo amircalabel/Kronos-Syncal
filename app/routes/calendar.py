@@ -578,8 +578,8 @@ def listar_conflictos(
 @router.delete("/eventos/{evento_id}")
 def eliminar_evento(
     evento_id: str,
-    eliminado_por: str = Query(default="local", min_length=1),
     request: Request,
+    eliminado_por: str = Query(default="local", min_length=1),
     db: Session = Depends(get_db),
 ):
     """Registra un tombstone y marca el evento cancelado sin borrarlo físicamente."""

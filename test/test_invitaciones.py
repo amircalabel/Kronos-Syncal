@@ -1,6 +1,7 @@
 from uuid import uuid4
 
 import pytest
+from tests.conftest import EMAIL_PRUEBA
 from fastapi.testclient import TestClient
 
 from main import app
@@ -52,7 +53,7 @@ def test_invitar_agrega_participantes_pendientes(cliente_autenticado):
 def test_aceptar_invitacion_sin_conflicto(cliente_autenticado):
     client = cliente_autenticado
     evento = crear_evento(client)
-    usuario = f"usuario-{uuid4()}"
+    usuario = EMAIL_PRUEBA
     client.post(
         f"/api/eventos/{evento['id']}/invitar",
         json={"participantes": [usuario]},
@@ -72,7 +73,7 @@ def test_aceptar_invitacion_sin_conflicto(cliente_autenticado):
 
 def test_aceptar_con_conflicto_devuelve_409_y_no_cambia_respuesta(cliente_autenticado):
     client = cliente_autenticado
-    usuario = f"usuario-{uuid4()}"
+    usuario = EMAIL_PRUEBA
     conflicto = crear_evento(client, creador=usuario)
     evento = crear_evento(client)
     client.post(
@@ -101,7 +102,7 @@ def test_aceptar_con_conflicto_devuelve_409_y_no_cambia_respuesta(cliente_autent
 
 def test_aceptar_con_conflicto_y_forzar(cliente_autenticado):
     client = cliente_autenticado
-    usuario = f"usuario-{uuid4()}"
+    usuario = EMAIL_PRUEBA
     crear_evento(client, creador=usuario)
     evento = crear_evento(client)
     client.post(
@@ -121,7 +122,7 @@ def test_aceptar_con_conflicto_y_forzar(cliente_autenticado):
 def test_confirmar_requiere_una_invitacion_aceptada(cliente_autenticado):
     client = cliente_autenticado
     evento = crear_evento(client)
-    usuario = f"usuario-{uuid4()}"
+    usuario = EMAIL_PRUEBA
     client.post(
         f"/api/eventos/{evento['id']}/invitar",
         json={"participantes": [usuario]},
