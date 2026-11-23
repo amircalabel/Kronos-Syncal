@@ -21,6 +21,8 @@
 
 Las fechas usan ISO 8601. Se rechazan intervalos inválidos y estados fuera de propuesta, confirmado o cancelado. Las invitaciones comienzan como `pendiente`; solo se puede confirmar un evento mediante `PUT` después de que al menos un participante lo haya aceptado. `forzar: true` permite aceptar pese a los conflictos informados. La API aún no autentica la identidad del creador o de los participantes.
 
+Las respuestas del evento incluyen `invitaciones`, con `usuario`, `respuesta` y `respondido_en`. Los intervalos se consideran superpuestos cuando comparten tiempo (el fin de uno igual al inicio del otro no cuenta como conflicto). Un `409` al aceptar incluye en `detail.conflictos` los eventos en conflicto; `forzar: true` permite continuar y registrar la aceptación.
+
 ## Por qué se hizo así
 
 La API REST es compatible con el navegador y permite a otros clientes consultar calendarios. Los esquemas Pydantic validan las entradas antes de persistirlas.
