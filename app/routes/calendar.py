@@ -1,12 +1,13 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Literal
 from uuid import uuid4
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, status
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 from sqlalchemy.orm import Session
+from dateutil.rrule import rrulestr
 
 from app import sync
 from app.crdt import (
@@ -20,6 +21,7 @@ from app.models import Calendario, Evento, EventoTombstone, Invitacion
 
 router = APIRouter(prefix="/api")
 EstadosEvento = Literal["propuesta", "confirmado", "cancelado"]
+VisibilidadEvento = Literal["publico", "privado", "solo_invitados"]
 
 
 class CalendarioCrear(BaseModel):
@@ -45,6 +47,9 @@ class EventoCrear(BaseModel):
     participantes: list[str] = Field(default_factory=list)
     estado: EstadosEvento = "propuesta"
     calendario_id: str | None = None
+    rrule: str | None = None
+    exdates: list[datetime] = Field(default_factory=list)
+    visibilidad: VisibilidadEvento = "publico"
 
     @model_validator(mode="after")
     def validar_intervalo(self):
@@ -63,6 +68,9 @@ class EventoActualizar(BaseModel):
     participantes: list[str] | None = None
     estado: EstadosEvento | None = None
     calendario_id: str | None = None
+    rrule: str | None = None
+    exdates: list[datetime] | None = None
+    visibilidad: VisibilidadEvento | None = None
 
 
 class InvitacionesCrear(BaseModel):
@@ -105,6 +113,9 @@ class EventoRespuesta(BaseModel):
     version: int
     ultima_modificacion: datetime
     calendario_id: str | None
+    rrule: str | None = None
+    exdates: list[datetime] = Field(default_factory=list)
+    visibilidad: VisibilidadEvento = "publico"
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -152,9 +163,16 @@ def _aplicar_campos(evento: Evento, valores: dict) -> None:
         "participantes",
         "estado",
         "calendario_id",
+        "rrule",
+        "visibilidad",
     ):
         if campo in valores:
             setattr(evento, campo, valores[campo])
+    if "exdates" in valores:
+        evento.exdates = [
+            _sin_zona(_parsear_fecha(fecha)).isoformat()
+            for fecha in valores["exdates"]
+        ]
     for campo in ("inicio", "fin", "ultima_modificacion"):
         if campo in valores and valores[campo] is not None:
             setattr(evento, campo, _sin_zona(_parsear_fecha(valores[campo])))
@@ -169,6 +187,82 @@ def _calendario_predeterminado(db: Session) -> Calendario:
         db.add(calendario)
         db.flush()
     return calendario
+
+
+def usuario_actual(request: Request) -> str | None:
+    return request.session.get("user", {}).get("email")
+
+
+UsuarioActual = Depends(usuario_actual)
+
+
+def _puede_ver_evento(evento: Evento, email: str | None) -> bool:
+    visibilidad = evento.visibilidad or "publico"
+    if visibilidad == "publico":
+        return True
+    if not email:
+        return False
+    if visibilidad == "privado":
+        return email == evento.creador
+    invitados = set(evento.participantes or [])
+    invitados.update(invitacion.usuario for invitacion in evento.invitaciones)
+    return email == evento.creador or email in invitados
+
+
+def _ocurrencias_evento(
+    evento: Evento,
+    desde: datetime | None,
+    hasta: datetime | None,
+) -> list[dict]:
+    datos = {
+        "id": evento.id,
+        "titulo": evento.titulo,
+        "descripcion": evento.descripcion,
+        "inicio": evento.inicio,
+        "fin": evento.fin,
+        "todo_el_dia": evento.todo_el_dia,
+        "creador": evento.creador,
+        "participantes": evento.participantes or [],
+        "invitaciones": [
+            {
+                "usuario": invitacion.usuario,
+                "respuesta": invitacion.respuesta,
+                "respondido_en": invitacion.respondido_en,
+            }
+            for invitacion in evento.invitaciones
+        ],
+        "estado": evento.estado,
+        "version": evento.version,
+        "ultima_modificacion": evento.ultima_modificacion,
+        "calendario_id": evento.calendario_id,
+        "rrule": evento.rrule,
+        "exdates": evento.exdates or [],
+        "visibilidad": evento.visibilidad or "publico",
+    }
+    if not evento.rrule:
+        return [datos]
+
+    inicio = _sin_zona(evento.inicio)
+    limite_inicio = _sin_zona(desde) if desde else inicio
+    limite_fin = _sin_zona(hasta) if hasta else inicio + timedelta(days=365 * 5)
+    try:
+        regla = rrulestr(evento.rrule, dtstart=inicio)
+        ocurrencias = regla.between(limite_inicio, limite_fin, inc=True)
+    except (TypeError, ValueError):
+        return [datos]
+
+    exdates = {_sin_zona(_parsear_fecha(fecha)) for fecha in (evento.exdates or [])}
+    duracion = evento.fin - evento.inicio
+    resultado = []
+    for ocurrencia in ocurrencias:
+        if ocurrencia in exdates:
+            continue
+        item = dict(datos)
+        item["id"] = f"{evento.id}::{ocurrencia.isoformat()}"
+        item["inicio"] = ocurrencia
+        item["fin"] = ocurrencia + duracion
+        resultado.append(item)
+    return resultado
 
 
 def _registrar_cambios_evento(evento: Evento, cambios: dict) -> None:
@@ -208,6 +302,7 @@ def _conflictos_evento_usuario(
 
 @router.get("/eventos", response_model=list[EventoRespuesta])
 def listar_eventos(
+    request: Request,
     calendario_id: str | None = None,
     estado: EstadosEvento | None = None,
     desde: datetime | None = None,
@@ -226,13 +321,25 @@ def listar_eventos(
         consulta = consulta.filter(Evento.fin > _sin_zona(desde))
     if hasta:
         consulta = consulta.filter(Evento.inicio < _sin_zona(hasta))
-    return consulta.order_by(Evento.inicio).all()
+    email = usuario_actual(request)
+    eventos = [
+        evento
+        for evento in consulta.order_by(Evento.inicio).all()
+        if _puede_ver_evento(evento, email)
+    ]
+    resultado = []
+    for evento in eventos:
+        resultado.extend(_ocurrencias_evento(evento, desde, hasta))
+    return resultado
 
 
 @router.get("/eventos/{evento_id}", response_model=EventoRespuesta)
-def obtener_evento(evento_id: str, db: Session = Depends(get_db)):
+def obtener_evento(evento_id: str, request: Request, db: Session = Depends(get_db)):
+    evento_id = evento_id.split("::", 1)[0]
     evento = db.get(Evento, evento_id)
     if evento is None:
+        raise HTTPException(status_code=404, detail="Evento no encontrado")
+    if not _puede_ver_evento(evento, usuario_actual(request)):
         raise HTTPException(status_code=404, detail="Evento no encontrado")
     return evento
 
@@ -242,8 +349,19 @@ def obtener_evento(evento_id: str, db: Session = Depends(get_db)):
     response_model=EventoRespuesta,
     status_code=status.HTTP_201_CREATED,
 )
-def crear_evento(datos: EventoCrear, db: Session = Depends(get_db)):
+def crear_evento(
+    datos: EventoCrear,
+    request: Request,
+    db: Session = Depends(get_db),
+):
+    email = usuario_actual(request)
+    if not email:
+        raise HTTPException(status_code=401, detail="No autenticado")
     valores = datos.model_dump()
+    valores["exdates"] = [
+        _sin_zona(fecha).isoformat() for fecha in valores["exdates"]
+    ]
+    valores["creador"] = email
     calendario_id = valores["calendario_id"]
     if calendario_id:
         if db.get(Calendario, calendario_id) is None:
@@ -282,11 +400,19 @@ def crear_evento(datos: EventoCrear, db: Session = Depends(get_db)):
 
 @router.put("/eventos/{evento_id}", response_model=EventoRespuesta)
 def actualizar_evento(
-    evento_id: str, cambios: EventoActualizar, db: Session = Depends(get_db)
+    evento_id: str,
+    cambios: EventoActualizar,
+    request: Request,
+    db: Session = Depends(get_db),
 ):
+    email = usuario_actual(request)
+    if not email:
+        raise HTTPException(status_code=401, detail="No autenticado")
     evento = db.get(Evento, evento_id)
     if evento is None:
         raise HTTPException(status_code=404, detail="Evento no encontrado")
+    if email != evento.creador:
+        raise HTTPException(status_code=403, detail="Solo el creador puede modificar el evento")
 
     valores = cambios.model_dump(exclude_unset=True)
     if any(valor is None for valor in valores.values()):
@@ -338,11 +464,19 @@ def actualizar_evento(
 
 @router.post("/eventos/{evento_id}/invitar", response_model=EventoRespuesta)
 def invitar_participantes(
-    evento_id: str, datos: InvitacionesCrear, db: Session = Depends(get_db)
+    evento_id: str,
+    datos: InvitacionesCrear,
+    request: Request,
+    db: Session = Depends(get_db),
 ):
+    email = usuario_actual(request)
+    if not email:
+        raise HTTPException(status_code=401, detail="No autenticado")
     evento = db.get(Evento, evento_id)
     if evento is None:
         raise HTTPException(status_code=404, detail="Evento no encontrado")
+    if email != evento.creador:
+        raise HTTPException(status_code=403, detail="Solo el creador puede invitar participantes")
 
     participantes = list(evento.participantes or [])
     for usuario in datos.participantes:
@@ -367,8 +501,16 @@ def invitar_participantes(
 
 @router.post("/eventos/{evento_id}/responder", response_model=EventoRespuesta)
 def responder_invitacion(
-    evento_id: str, datos: ResponderInvitacion, db: Session = Depends(get_db)
+    evento_id: str,
+    datos: ResponderInvitacion,
+    request: Request,
+    db: Session = Depends(get_db),
 ):
+    email = usuario_actual(request)
+    if not email:
+        raise HTTPException(status_code=401, detail="No autenticado")
+    if email != datos.usuario:
+        raise HTTPException(status_code=403, detail="Solo puede responder por su propia invitación")
     evento = db.get(Evento, evento_id)
     if evento is None:
         raise HTTPException(status_code=404, detail="Evento no encontrado")
@@ -437,12 +579,18 @@ def listar_conflictos(
 def eliminar_evento(
     evento_id: str,
     eliminado_por: str = Query(default="local", min_length=1),
+    request: Request,
     db: Session = Depends(get_db),
 ):
     """Registra un tombstone y marca el evento cancelado sin borrarlo físicamente."""
+    email = usuario_actual(request)
+    if not email:
+        raise HTTPException(status_code=401, detail="No autenticado")
     evento = db.get(Evento, evento_id)
     if evento is None:
         raise HTTPException(status_code=404, detail="Evento no encontrado")
+    if email != evento.creador:
+        raise HTTPException(status_code=403, detail="Solo el creador puede eliminar el evento")
     ahora = datetime.now(timezone.utc).replace(tzinfo=None)
     evento.estado = "cancelado"
     evento.version += 1

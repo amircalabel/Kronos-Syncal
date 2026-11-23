@@ -60,6 +60,13 @@ class Evento(Base):
         String(36), ForeignKey("calendarios.id", ondelete="SET NULL"), nullable=True
     )
     crdt_data = Column(JSON, nullable=False, default=dict)
+    rrule = Column(String, nullable=True)
+    exdates = Column(JSON, nullable=True, default=list)
+    visibilidad = Column(
+        String,
+        nullable=False,
+        default="publico",
+    )
     invitaciones = relationship(
         "Invitacion",
         back_populates="evento",
@@ -81,7 +88,18 @@ class Evento(Base):
             "version": self.version,
             "ultima_modificacion": self.ultima_modificacion,
             "calendario_id": self.calendario_id,
+            "rrule": self.rrule,
+            "exdates": self.exdates or [],
+            "visibilidad": self.visibilidad,
         }
+
+
+class Usuario(Base):
+    __tablename__ = "usuarios"
+
+    email = Column(String, primary_key=True)
+    nombre = Column(String, nullable=False)
+    google_sub = Column(String, unique=True, nullable=True)
 
 
 class Invitacion(Base):

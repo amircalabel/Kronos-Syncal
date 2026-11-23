@@ -6,12 +6,6 @@ from fastapi.testclient import TestClient
 from main import app
 
 
-@pytest.fixture(scope="module")
-def client():
-    with TestClient(app) as test_client:
-        yield test_client
-
-
 def crear_evento(
     client,
     *,
@@ -32,7 +26,8 @@ def crear_evento(
     return respuesta.json()
 
 
-def test_invitar_agrega_participantes_pendientes(client):
+def test_invitar_agrega_participantes_pendientes(cliente_autenticado):
+    client = cliente_autenticado
     evento = crear_evento(client)
     usuarios = [f"usuario-{uuid4()}", f"usuario-{uuid4()}"]
 
@@ -54,7 +49,8 @@ def test_invitar_agrega_participantes_pendientes(client):
     )
 
 
-def test_aceptar_invitacion_sin_conflicto(client):
+def test_aceptar_invitacion_sin_conflicto(cliente_autenticado):
+    client = cliente_autenticado
     evento = crear_evento(client)
     usuario = f"usuario-{uuid4()}"
     client.post(
@@ -74,7 +70,8 @@ def test_aceptar_invitacion_sin_conflicto(client):
     assert respuesta.json()["estado"] == "propuesta"
 
 
-def test_aceptar_con_conflicto_devuelve_409_y_no_cambia_respuesta(client):
+def test_aceptar_con_conflicto_devuelve_409_y_no_cambia_respuesta(cliente_autenticado):
+    client = cliente_autenticado
     usuario = f"usuario-{uuid4()}"
     conflicto = crear_evento(client, creador=usuario)
     evento = crear_evento(client)
@@ -102,7 +99,8 @@ def test_aceptar_con_conflicto_devuelve_409_y_no_cambia_respuesta(client):
     assert evento_actualizado["invitaciones"][0]["respondido_en"] is None
 
 
-def test_aceptar_con_conflicto_y_forzar(client):
+def test_aceptar_con_conflicto_y_forzar(cliente_autenticado):
+    client = cliente_autenticado
     usuario = f"usuario-{uuid4()}"
     crear_evento(client, creador=usuario)
     evento = crear_evento(client)
@@ -120,7 +118,8 @@ def test_aceptar_con_conflicto_y_forzar(client):
     assert respuesta.json()["invitaciones"][0]["respuesta"] == "aceptado"
 
 
-def test_confirmar_requiere_una_invitacion_aceptada(client):
+def test_confirmar_requiere_una_invitacion_aceptada(cliente_autenticado):
+    client = cliente_autenticado
     evento = crear_evento(client)
     usuario = f"usuario-{uuid4()}"
     client.post(

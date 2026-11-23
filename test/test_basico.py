@@ -14,19 +14,15 @@ from app.crdt import (
 from main import app
 
 
-@pytest.fixture(scope="module")
-def client():
-    with TestClient(app) as test_client:
-        yield test_client
-
-
-def test_salud(client):
+def test_salud(cliente_autenticado):
+    client = cliente_autenticado
     respuesta = client.get("/api/health")
     assert respuesta.status_code == 200
     assert respuesta.json() == {"status": "ok"}
 
 
-def test_crear_listar_y_eliminar_evento(client):
+def test_crear_listar_y_eliminar_evento(cliente_autenticado):
+    client = cliente_autenticado
     inicio = datetime.now() + timedelta(days=1)
     fin = inicio + timedelta(hours=1)
     respuesta = client.post(

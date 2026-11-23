@@ -11,6 +11,22 @@ SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 Base = declarative_base()
 
 
+def asegurar_columnas_compatibilidad():
+    with engine.begin() as connection:
+        columnas = {
+            row[1]
+            for row in connection.exec_driver_sql("PRAGMA table_info(eventos)").fetchall()
+        }
+        if "rrule" not in columnas:
+            connection.exec_driver_sql("ALTER TABLE eventos ADD COLUMN rrule VARCHAR")
+        if "exdates" not in columnas:
+            connection.exec_driver_sql("ALTER TABLE eventos ADD COLUMN exdates JSON")
+        if "visibilidad" not in columnas:
+            connection.exec_driver_sql(
+                "ALTER TABLE eventos ADD COLUMN visibilidad VARCHAR NOT NULL DEFAULT 'publico'"
+            )
+
+
 @event.listens_for(engine, "connect")
 def activar_claves_foraneas(dbapi_connection, _connection_record):
     """Activa la integridad referencial en cada conexión SQLite."""
