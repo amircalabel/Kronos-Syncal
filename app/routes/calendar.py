@@ -5,7 +5,7 @@ from typing import Literal
 from uuid import uuid4
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 from sqlalchemy.orm import Session
 
 from app import sync
@@ -16,7 +16,7 @@ from app.crdt import (
     fusionar_eventos,
 )
 from app.database import SessionLocal, get_db
-from app.models import Calendario, Evento, EventoTombstone
+from app.models import Calendario, Evento, EventoTombstone, Invitacion
 
 router = APIRouter(prefix="/api")
 EstadosEvento = Literal["propuesta", "confirmado", "cancelado"]
@@ -65,6 +65,32 @@ class EventoActualizar(BaseModel):
     calendario_id: str | None = None
 
 
+class InvitacionesCrear(BaseModel):
+    participantes: list[str] = Field(min_length=1)
+
+    @field_validator("participantes")
+    @classmethod
+    def validar_participantes(cls, usuarios: list[str]) -> list[str]:
+        normalizados = [usuario.strip() for usuario in usuarios]
+        if any(not usuario for usuario in normalizados):
+            raise ValueError("Los participantes no pueden estar vacíos")
+        return list(dict.fromkeys(normalizados))
+
+
+class ResponderInvitacion(BaseModel):
+    usuario: str = Field(min_length=1)
+    respuesta: Literal["aceptado", "rechazado"]
+    forzar: bool = False
+
+
+class InvitacionRespuesta(BaseModel):
+    usuario: str
+    respuesta: Literal["pendiente", "aceptado", "rechazado"]
+    respondido_en: datetime | None
+
+    model_config = ConfigDict(from_attributes=True)
+
+
 class EventoRespuesta(BaseModel):
     id: str
     titulo: str
@@ -74,6 +100,7 @@ class EventoRespuesta(BaseModel):
     todo_el_dia: bool
     creador: str
     participantes: list[str]
+    invitaciones: list[InvitacionRespuesta]
     estado: EstadosEvento
     version: int
     ultima_modificacion: datetime
@@ -144,6 +171,41 @@ def _calendario_predeterminado(db: Session) -> Calendario:
     return calendario
 
 
+def _registrar_cambios_evento(evento: Evento, cambios: dict) -> None:
+    ahora = datetime.now(timezone.utc).replace(tzinfo=None)
+    valores = {
+        **cambios,
+        "version": evento.version + 1,
+        "ultima_modificacion": ahora,
+    }
+    doc = _crear_doc_evento(evento)
+    actualizar_evento_crdt(doc, valores, ahora.replace(tzinfo=timezone.utc).isoformat())
+    valores_doc = doc_a_dict(doc)
+    _aplicar_campos(evento, valores_doc)
+    evento.crdt_data = valores_doc
+
+
+def _conflictos_evento_usuario(
+    db: Session, evento: Evento, usuario: str
+) -> list[Evento]:
+    candidatos = (
+        db.query(Evento)
+        .filter(
+            Evento.id != evento.id,
+            Evento.estado != "cancelado",
+            Evento.inicio < evento.fin,
+            Evento.fin > evento.inicio,
+        )
+        .order_by(Evento.inicio)
+        .all()
+    )
+    return [
+        candidato
+        for candidato in candidatos
+        if usuario == candidato.creador or usuario in (candidato.participantes or [])
+    ]
+
+
 @router.get("/eventos", response_model=list[EventoRespuesta])
 def listar_eventos(
     calendario_id: str | None = None,
@@ -190,6 +252,12 @@ def crear_evento(datos: EventoCrear, db: Session = Depends(get_db)):
         calendario_id = _calendario_predeterminado(db).id
 
     ahora = datetime.now(timezone.utc).replace(tzinfo=None)
+    valores["participantes"] = list(dict.fromkeys(valores["participantes"]))
+    if valores["estado"] == "confirmado":
+        raise HTTPException(
+            status_code=409,
+            detail="Un evento solo puede confirmarse después de aceptar una invitación",
+        )
     evento = Evento(
         id=str(uuid4()),
         **{
@@ -203,6 +271,10 @@ def crear_evento(datos: EventoCrear, db: Session = Depends(get_db)):
     )
     evento.crdt_data = doc_a_dict(crear_evento_crdt(evento.to_dict()))
     db.add(evento)
+    db.add_all(
+        Invitacion(evento_id=evento.id, usuario=usuario)
+        for usuario in valores["participantes"]
+    )
     db.commit()
     db.refresh(evento)
     return evento
@@ -221,6 +293,14 @@ def actualizar_evento(
         raise HTTPException(status_code=422, detail="Los campos enviados no pueden ser nulos")
     if "calendario_id" in valores and db.get(Calendario, valores["calendario_id"]) is None:
         raise HTTPException(status_code=404, detail="Calendario no encontrado")
+    if valores.get("estado") == "confirmado" and not db.query(Invitacion).filter(
+        Invitacion.evento_id == evento_id,
+        Invitacion.respuesta == "aceptado",
+    ).first():
+        raise HTTPException(
+            status_code=409,
+            detail="Se requiere al menos una invitación aceptada para confirmar el evento",
+        )
     if "inicio" in valores:
         valores["inicio"] = _sin_zona(valores["inicio"])
     if "fin" in valores:
@@ -240,6 +320,105 @@ def actualizar_evento(
     db.commit()
     db.refresh(evento)
     return evento
+
+
+@router.post("/eventos/{evento_id}/invitar", response_model=EventoRespuesta)
+def invitar_participantes(
+    evento_id: str, datos: InvitacionesCrear, db: Session = Depends(get_db)
+):
+    evento = db.get(Evento, evento_id)
+    if evento is None:
+        raise HTTPException(status_code=404, detail="Evento no encontrado")
+
+    participantes = list(evento.participantes or [])
+    nuevos = []
+    for usuario in datos.participantes:
+        invitacion = (
+            db.query(Invitacion)
+            .filter(
+                Invitacion.evento_id == evento_id,
+                Invitacion.usuario == usuario,
+            )
+            .first()
+        )
+        if invitacion is None:
+            db.add(Invitacion(evento_id=evento_id, usuario=usuario))
+            nuevos.append(usuario)
+        if usuario not in participantes:
+            participantes.append(usuario)
+    evento.participantes = participantes
+    _registrar_cambios_evento(evento, {"participantes": participantes})
+    db.commit()
+    db.refresh(evento)
+    return evento
+
+
+@router.post("/eventos/{evento_id}/responder", response_model=EventoRespuesta)
+def responder_invitacion(
+    evento_id: str, datos: ResponderInvitacion, db: Session = Depends(get_db)
+):
+    evento = db.get(Evento, evento_id)
+    if evento is None:
+        raise HTTPException(status_code=404, detail="Evento no encontrado")
+    invitacion = (
+        db.query(Invitacion)
+        .filter(
+            Invitacion.evento_id == evento_id,
+            Invitacion.usuario == datos.usuario,
+        )
+        .first()
+    )
+    if invitacion is None:
+        raise HTTPException(status_code=404, detail="Invitación no encontrada")
+
+    if datos.respuesta == "aceptado":
+        conflictos = _conflictos_evento_usuario(db, evento, datos.usuario)
+        if conflictos and not datos.forzar:
+            conflictos_json = [
+                EventoRespuesta.model_validate(conflicto).model_dump(mode="json")
+                for conflicto in conflictos
+            ]
+            raise HTTPException(
+                status_code=409,
+                detail={
+                    "mensaje": "El usuario tiene otros eventos en ese intervalo",
+                    "conflictos": conflictos_json,
+                },
+            )
+
+    ahora = datetime.now(timezone.utc).replace(tzinfo=None)
+    invitacion.respuesta = datos.respuesta
+    invitacion.respondido_en = ahora
+    cambios = {}
+    if (
+        datos.respuesta == "rechazado"
+        and evento.estado == "confirmado"
+        and not db.query(Invitacion)
+        .filter(
+            Invitacion.evento_id == evento_id,
+            Invitacion.respuesta == "aceptado",
+            Invitacion.usuario != datos.usuario,
+        )
+        .first()
+    ):
+        cambios["estado"] = "propuesta"
+    _registrar_cambios_evento(evento, cambios)
+    db.commit()
+    db.refresh(evento)
+    return evento
+
+
+@router.get(
+    "/eventos/{evento_id}/conflictos",
+    response_model=list[EventoRespuesta],
+)
+def listar_conflictos(
+    evento_id: str, usuario: str = Query(min_length=1), db: Session = Depends(get_db)
+):
+    evento = db.get(Evento, evento_id)
+    if evento is None:
+        raise HTTPException(status_code=404, detail="Evento no encontrado")
+    return _conflictos_evento_usuario(db, evento, usuario)
 
 
 @router.delete("/eventos/{evento_id}")

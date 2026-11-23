@@ -9,6 +9,9 @@
 | GET | `/api/eventos/{id}` | — | Evento o 404 |
 | POST | `/api/eventos` | Título, fechas y campos opcionales | Evento creado (201) |
 | PUT | `/api/eventos/{id}` | Campos parciales del evento | Evento actualizado |
+| POST | `/api/eventos/{id}/invitar` | `{participantes: ["a", "b"]}` | Evento con invitaciones pendientes |
+| POST | `/api/eventos/{id}/responder` | `{usuario, respuesta, forzar?}`; respuesta es `aceptado` o `rechazado` | Evento actualizado; 409 si hay conflictos y no se fuerza |
+| GET | `/api/eventos/{id}/conflictos` | `usuario` | Lista de otros eventos no cancelados que se solapan |
 | DELETE | `/api/eventos/{id}` | `eliminado_por` opcional | Confirmación y tombstone |
 | GET | `/api/calendarios` | — | Lista de calendarios |
 | POST | `/api/calendarios` | `nombre`, `propietario` | Calendario creado (201) |
@@ -16,7 +19,7 @@
 | GET | `/api/sync/delta` | `desde` opcional (checkpoint ISO) | Eventos, tombstones y checkpoint |
 | POST | `/api/sync/enviar` | `{destino, cambios, timeout_ms?}`; cambios contiene listas `eventos` y `tombstones` | Resultado ZeroMQ |
 
-Las fechas usan ISO 8601. Se rechazan intervalos inválidos y estados fuera de propuesta, confirmado o cancelado.
+Las fechas usan ISO 8601. Se rechazan intervalos inválidos y estados fuera de propuesta, confirmado o cancelado. Las invitaciones comienzan como `pendiente`; solo se puede confirmar un evento mediante `PUT` después de que al menos un participante lo haya aceptado. `forzar: true` permite aceptar pese a los conflictos informados. La API aún no autentica la identidad del creador o de los participantes.
 
 ## Por qué se hizo así
 

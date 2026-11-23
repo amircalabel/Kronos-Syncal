@@ -2,7 +2,7 @@
 
 ## Qué se hizo
 
-Se dejaron identificadas como fases posteriores la detección P2P, el flujo completo de invitaciones, recurrencias RRULE, el mini-agente de lenguaje natural y el cliente offline-first basado en IndexedDB. El mini-agente no forma parte de esta implementación.
+Se dejaron identificadas como fases posteriores la detección P2P, recurrencias RRULE, el mini-agente de lenguaje natural y el cliente offline-first basado en IndexedDB. El mini-agente no forma parte de esta implementación.
 
 ## Por qué se hizo así
 
@@ -10,7 +10,7 @@ Estas funciones requieren decisiones adicionales de privacidad, identidad, model
 
 ## Limitaciones
 
-No se envían ni aceptan invitaciones con estados por participante. No se expanden eventos recurrentes, no hay descubrimiento P2P y no se interpreta texto natural. La interfaz depende de la API en línea, aunque la base local del servidor sigue disponible.
+No se expanden eventos recurrentes, no hay descubrimiento P2P y no se interpreta texto natural. La API de invitaciones y conflictos aún no autentica las identidades de los participantes. La interfaz depende de la API en línea, aunque la base local del servidor sigue disponible.
 
 ## Estado de pruebas
 

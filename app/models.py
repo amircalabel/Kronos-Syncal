@@ -13,7 +13,9 @@ from sqlalchemy import (
     JSON,
     String,
     Text,
+    UniqueConstraint,
 )
+from sqlalchemy.orm import relationship
 
 from app.database import Base
 
@@ -58,6 +60,12 @@ class Evento(Base):
         String(36), ForeignKey("calendarios.id", ondelete="SET NULL"), nullable=True
     )
     crdt_data = Column(JSON, nullable=False, default=dict)
+    invitaciones = relationship(
+        "Invitacion",
+        back_populates="evento",
+        cascade="all, delete-orphan",
+        order_by="Invitacion.usuario",
+    )
 
     def to_dict(self) -> dict:
         return {
@@ -74,6 +82,26 @@ class Evento(Base):
             "ultima_modificacion": self.ultima_modificacion,
             "calendario_id": self.calendario_id,
         }
+
+
+class Invitacion(Base):
+    __tablename__ = "invitaciones"
+    __table_args__ = (
+        UniqueConstraint("evento_id", "usuario", name="uq_invitaciones_evento_usuario"),
+        CheckConstraint(
+            "respuesta IN ('pendiente', 'aceptado', 'rechazado')",
+            name="ck_invitaciones_respuesta",
+        ),
+    )
+
+    id = Column(String(36), primary_key=True, default=lambda: str(uuid4()))
+    evento_id = Column(
+        String(36), ForeignKey("eventos.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    usuario = Column(String, nullable=False)
+    respuesta = Column(String, nullable=False, default="pendiente")
+    respondido_en = Column(DateTime, nullable=True)
+    evento = relationship("Evento", back_populates="invitaciones")
 
 
 class EventoTombstone(Base):

@@ -7,7 +7,7 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
 from app.database import Base, engine
-from app.models import Calendario, Evento, EventoTombstone  # noqa: F401
+from app.models import Calendario, Evento, EventoTombstone, Invitacion  # noqa: F401
 from app.routes.calendar import aplicar_delta_sync, router
 from app.sync import detener_servidor_sync, iniciar_servidor_sync
 
