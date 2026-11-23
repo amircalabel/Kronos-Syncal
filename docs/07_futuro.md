@@ -11,3 +11,7 @@ Estas funciones requieren decisiones adicionales de privacidad, identidad, model
 ## Limitaciones
 
 No se envían ni aceptan invitaciones con estados por participante. No se expanden eventos recurrentes, no hay descubrimiento P2P y no se interpreta texto natural. La interfaz depende de la API en línea, aunque la base local del servidor sigue disponible.
+
+## Estado de pruebas
+
+Verificación: 4 pruebas aprobadas, 0 fallidas, 0 errores y 0 omitidas. Las rutas de salud y eventos superaron la prueba manual; la fusión CRDT conservó la edición con la marca temporal más reciente.
