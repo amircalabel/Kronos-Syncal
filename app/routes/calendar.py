@@ -1,13 +1,16 @@
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 from typing import Literal
 from uuid import uuid4
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, status
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
-from sqlalchemy.orm import Session
 from dateutil.rrule import rrulestr
+import ray
+from sqlalchemy import create_engine
+from sqlalchemy.orm import Session, sessionmaker
 
 from app import sync
 from app.crdt import (
@@ -16,7 +19,7 @@ from app.crdt import (
     doc_a_dict,
     fusionar_eventos,
 )
-from app.database import SessionLocal, get_db
+from app.database import SessionLocal, engine as database_engine, get_db
 from app.models import Calendario, Evento, EventoTombstone, Invitacion
 
 router = APIRouter(prefix="/api")
@@ -210,12 +213,8 @@ def _puede_ver_evento(evento: Evento, email: str | None) -> bool:
     return email == evento.creador or email in invitados
 
 
-def _ocurrencias_evento(
-    evento: Evento,
-    desde: datetime | None,
-    hasta: datetime | None,
-) -> list[dict]:
-    datos = {
+def _evento_a_dict(evento: Evento) -> dict:
+    return {
         "id": evento.id,
         "titulo": evento.titulo,
         "descripcion": evento.descripcion,
@@ -240,30 +239,93 @@ def _ocurrencias_evento(
         "exdates": evento.exdates or [],
         "visibilidad": evento.visibilidad or "publico",
     }
-    if not evento.rrule:
+
+
+@ray.remote
+def _expandir_recurrencia(
+    evento_dict: dict,
+    inicio_query: datetime | None,
+    fin_query: datetime | None,
+) -> list[dict]:
+    datos = dict(evento_dict)
+    if not datos.get("rrule"):
         return [datos]
 
-    inicio = _sin_zona(evento.inicio)
-    limite_inicio = _sin_zona(desde) if desde else inicio
-    limite_fin = _sin_zona(hasta) if hasta else inicio + timedelta(days=365 * 5)
+    inicio = _sin_zona(_parsear_fecha(datos["inicio"]))
+    fin = _sin_zona(_parsear_fecha(datos["fin"]))
+    limite_inicio = _sin_zona(inicio_query) if inicio_query else inicio
+    limite_fin = (
+        _sin_zona(fin_query)
+        if fin_query
+        else inicio + timedelta(days=365 * 5)
+    )
     try:
-        regla = rrulestr(evento.rrule, dtstart=inicio)
+        regla = rrulestr(datos["rrule"], dtstart=inicio)
         ocurrencias = regla.between(limite_inicio, limite_fin, inc=True)
     except (TypeError, ValueError):
         return [datos]
 
-    exdates = {_sin_zona(_parsear_fecha(fecha)) for fecha in (evento.exdates or [])}
-    duracion = evento.fin - evento.inicio
+    exdates = {
+        _sin_zona(_parsear_fecha(fecha)) for fecha in (datos.get("exdates") or [])
+    }
+    duracion = fin - inicio
     resultado = []
     for ocurrencia in ocurrencias:
         if ocurrencia in exdates:
             continue
         item = dict(datos)
-        item["id"] = f"{evento.id}::{ocurrencia.isoformat()}"
+        item["id"] = f"{datos['id']}::{ocurrencia.isoformat()}"
         item["inicio"] = ocurrencia
         item["fin"] = ocurrencia + duracion
         resultado.append(item)
     return resultado
+
+
+@ray.remote
+def _calcular_disponibilidad_usuario(
+    usuario: str,
+    inicio: datetime,
+    fin: datetime,
+    db_url: str,
+) -> list[dict]:
+    """Calcula los intervalos ocupados de un usuario desde la base compartida."""
+    connect_args = {"check_same_thread": False} if db_url.startswith("sqlite") else {}
+    task_engine = create_engine(db_url, connect_args=connect_args)
+    task_session = sessionmaker(bind=task_engine)()
+    try:
+        eventos = (
+            task_session.query(Evento)
+            .filter(
+                Evento.estado != "cancelado",
+                Evento.inicio < fin,
+                Evento.fin > inicio,
+            )
+            .order_by(Evento.inicio)
+            .all()
+        )
+        ocupados = []
+        for evento in eventos:
+            asistentes = {evento.creador, *(evento.participantes or [])}
+            if usuario in asistentes:
+                ocupados.append(
+                    {
+                        "inicio": max(inicio, evento.inicio),
+                        "fin": min(fin, evento.fin),
+                        "evento_id": evento.id,
+                    }
+                )
+    finally:
+        task_session.close()
+        task_engine.dispose()
+
+    ocupados.sort(key=lambda intervalo: intervalo["inicio"])
+    fusionados = []
+    for intervalo in ocupados:
+        if fusionados and intervalo["inicio"] <= fusionados[-1]["fin"]:
+            fusionados[-1]["fin"] = max(fusionados[-1]["fin"], intervalo["fin"])
+        else:
+            fusionados.append(dict(intervalo))
+    return fusionados
 
 
 def _registrar_cambios_evento(evento: Evento, cambios: dict) -> None:
@@ -328,9 +390,23 @@ def listar_eventos(
         for evento in consulta.order_by(Evento.inicio).all()
         if _puede_ver_evento(evento, email)
     ]
+    datos_eventos = [_evento_a_dict(evento) for evento in eventos]
+    eventos_con_rrule = [evento for evento in datos_eventos if evento["rrule"]]
+    futuros = [
+        _expandir_recurrencia.remote(evento, desde, hasta)
+        for evento in eventos_con_rrule
+    ]
+    ocurrencias = ray.get(futuros) if futuros else []
+    ocurrencias_por_evento = {
+        evento["id"]: expandidas
+        for evento, expandidas in zip(eventos_con_rrule, ocurrencias)
+    }
     resultado = []
-    for evento in eventos:
-        resultado.extend(_ocurrencias_evento(evento, desde, hasta))
+    for evento in datos_eventos:
+        if evento["rrule"]:
+            resultado.extend(ocurrencias_por_evento[evento["id"]])
+        else:
+            resultado.append(evento)
     return resultado
 
 
@@ -641,17 +717,18 @@ def consultar_disponibilidad(
     if fin <= inicio:
         raise HTTPException(status_code=422, detail="fin debe ser posterior a inicio")
     solicitados = {usuario.strip() for usuario in usuarios.split(",") if usuario.strip()}
-    eventos = (
-        db.query(Evento)
-        .filter(
-            Evento.estado != "cancelado",
-            Evento.inicio < fin,
-            Evento.fin > inicio,
-        )
-        .order_by(Evento.inicio)
-        .all()
-    )
+    eventos = []
     if not solicitados:
+        eventos = (
+            db.query(Evento)
+            .filter(
+                Evento.estado != "cancelado",
+                Evento.inicio < fin,
+                Evento.fin > inicio,
+            )
+            .order_by(Evento.inicio)
+            .all()
+        )
         solicitados = {
             usuario
             for evento in eventos
@@ -659,24 +736,21 @@ def consultar_disponibilidad(
             if usuario
         }
 
+    db_url = database_engine.url
+    if (
+        db_url.drivername.startswith("sqlite")
+        and db_url.database not in (None, ":memory:")
+    ):
+        db_url = db_url.set(database=str(Path(db_url.database).resolve()))
+    db_url_string = db_url.render_as_string(hide_password=False)
+    usuarios_ordenados = sorted(solicitados)
+    futuros = [
+        _calcular_disponibilidad_usuario.remote(usuario, inicio, fin, db_url_string)
+        for usuario in usuarios_ordenados
+    ]
+    ocupaciones = ray.get(futuros) if futuros else []
     resultado = {}
-    for usuario in sorted(solicitados):
-        ocupados = []
-        for evento in eventos:
-            asistentes = {evento.creador, *(evento.participantes or [])}
-            if usuario in asistentes:
-                desde = max(inicio, evento.inicio)
-                hasta = min(fin, evento.fin)
-                ocupados.append(
-                    {"inicio": desde, "fin": hasta, "evento_id": evento.id}
-                )
-        ocupados.sort(key=lambda intervalo: intervalo["inicio"])
-        fusionados = []
-        for intervalo in ocupados:
-            if fusionados and intervalo["inicio"] <= fusionados[-1]["fin"]:
-                fusionados[-1]["fin"] = max(fusionados[-1]["fin"], intervalo["fin"])
-            else:
-                fusionados.append(dict(intervalo))
+    for usuario, fusionados in zip(usuarios_ordenados, ocupaciones):
         libres = []
         cursor = inicio
         for intervalo in fusionados:

@@ -10,6 +10,8 @@ from fastapi.staticfiles import StaticFiles
 from starlette.middleware.sessions import SessionMiddleware
 from dotenv import load_dotenv
 
+import ray
+
 load_dotenv()
 
 from app.database import Base, asegurar_columnas_compatibilidad, engine
@@ -25,11 +27,16 @@ BASE_DIR = Path(__file__).resolve().parent
 async def lifespan(_application: FastAPI):
     Base.metadata.create_all(bind=engine)
     asegurar_columnas_compatibilidad()
-    iniciar_servidor_sync(5555, aplicar_delta_sync)
+    if os.getenv("RAY_ADDRESS"):
+        ray.init(address="auto", ignore_reinit_error=True)
+    else:
+        ray.init(ignore_reinit_error=True)
     try:
+        iniciar_servidor_sync(5555, aplicar_delta_sync)
         yield
     finally:
         detener_servidor_sync(5555)
+        ray.shutdown()
 
 
 app = FastAPI(title="Kronos-Syncal", version="0.1.0", lifespan=lifespan)

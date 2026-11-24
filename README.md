@@ -9,7 +9,7 @@ se resuelven con registros CRDT LWW.
 Python 3.10 o posterior. Instala las dependencias del proyecto en tu entorno:
 
 ```bash
-python -m pip install "fastapi[standard]" sqlalchemy pyzmq pycrdt authlib python-dateutil itsdangerous python-dotenv pytest httpx
+python -m pip install "fastapi[standard]" sqlalchemy pyzmq pycrdt authlib python-dateutil itsdangerous python-dotenv ray pytest httpx
 ```
 
 ## Configuración de Google OAuth
@@ -37,9 +37,24 @@ Desde la raíz del repositorio:
 uvicorn main:app --reload
 ```
 
+Por defecto, la aplicación inicia un runtime local de Ray. Para conectar con
+un clúster local iniciado manualmente, ejecuta en una terminal:
+
+```bash
+ray start --head
+```
+
+Y en otra terminal inicia la aplicación indicando que debe descubrir el
+clúster:
+
+```bash
+RAY_ADDRESS=auto uvicorn main:app --reload
+```
+
 Abre `http://localhost:8000`. La base de datos `kronos.db` se crea en el
 directorio de trabajo. Cada nodo que reciba sincronizaciones debe permitir
 conexiones TCP entrantes en el puerto `5555`; la API HTTP usa el puerto `8000`.
+La paralelización con Ray Core se describe en [docs/08_ray.md](docs/08_ray.md).
 
 Para ejecutar las pruebas:
 
