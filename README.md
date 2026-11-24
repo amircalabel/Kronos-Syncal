@@ -9,8 +9,25 @@ se resuelven con registros CRDT LWW.
 Python 3.10 o posterior. Instala las dependencias del proyecto en tu entorno:
 
 ```bash
-python -m pip install "fastapi[standard]" sqlalchemy pyzmq pycrdt pytest httpx
+python -m pip install "fastapi[standard]" sqlalchemy pyzmq pycrdt authlib python-dateutil itsdangerous python-dotenv pytest httpx
 ```
+
+## Configuración de Google OAuth
+
+Crea un archivo `.env` en la raíz del proyecto y define estas variables:
+
+```dotenv
+GOOGLE_CLIENT_ID=tu-id-de-cliente
+GOOGLE_CLIENT_SECRET=tu-secreto-de-cliente
+SESSION_SECRET=una-clave-aleatoria-larga
+```
+
+Configura un cliente OAuth de tipo aplicación web en Google Cloud y registra
+`http://localhost:8000/auth/callback` como URI de redirección autorizada para
+desarrollo local. En producción, registra también la URI HTTPS de tu dominio
+con la ruta `/auth/callback` y usa esa misma dirección pública al acceder a la
+aplicación. Mantén el archivo `.env` y sus secretos fuera del control de
+versiones. Inicia el flujo visitando `/auth/login`.
 
 ## Ejecución
 
@@ -39,9 +56,10 @@ enviar cambios a otro nodo. La documentación de rutas y cuerpos está en
 
 ## Alcance actual
 
-Incluye calendarios, eventos, consulta de disponibilidad, tombstones y delta
-sync con checkpoint temporal. La sincronización no cifra ni autentica los
-mensajes; úsala solo en redes confiables. No incluye descubrimiento P2P,
-flujo completo de invitaciones, recurrencias, mini-agente de lenguaje natural
-ni almacenamiento offline en el navegador; estas funciones quedan para fases
-futuras descritas en [docs/07_futuro.md](docs/07_futuro.md).
+Incluye autenticación de usuarios con Google OAuth, calendarios, eventos,
+invitaciones, consulta de disponibilidad, recurrencias con exclusiones
+(`rrule` y `exdates`), privacidad por evento y sincronización delta con CRDT y
+checkpoint temporal. El transporte de sincronización no cifra ni autentica sus
+mensajes; úsalo solo en redes confiables. No incluye descubrimiento P2P ni
+almacenamiento offline en el navegador. Consulta las demás limitaciones en
+[docs/07_futuro.md](docs/07_futuro.md).
