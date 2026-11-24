@@ -28,6 +28,15 @@ ocupados devueltos en la aplicación. `GET /api/eventos` envía a Tasks los
 eventos recurrentes y vuelve a colocar sus ocurrencias expandidas en el orden
 de eventos del resultado. Los eventos sin recurrencia no requieren expansión.
 
+## Verificación
+
+La ejecución con Ray Core real se verificó en el entorno local: una Task remota
+de prueba devolvió el resultado esperado y `ray.shutdown()` cerró el runtime.
+También se ejecutó la suite completa con el runtime Ray activo: las 22 pruebas
+pasaron, incluidas las comprobaciones de disponibilidad paralela y expansión
+de tres eventos recurrentes. Estas pruebas usan `@ray.remote`, `.remote()` y
+`ray.get()` reales, sin reemplazos síncronos.
+
 ## Tolerancia a fallos y determinismo
 
 Ray conserva el linaje de las Tasks para poder reconstruir resultados perdidos
