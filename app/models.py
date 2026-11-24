@@ -42,6 +42,10 @@ class Evento(Base):
             "estado IN ('propuesta', 'confirmado', 'cancelado')",
             name="ck_eventos_estado",
         ),
+        CheckConstraint(
+            "visibilidad IN ('publico', 'privado', 'solo_invitados')",
+            name="ck_eventos_visibilidad",
+        ),
         CheckConstraint("fin > inicio", name="ck_eventos_intervalo"),
     )
 

@@ -11,3 +11,9 @@ REQ/REP es un patrón pequeño de solicitud y respuesta. Un checkpoint temporal 
 ## Limitaciones
 
 El transporte no cifra ni autentica conexiones: debe limitarse a redes confiables. El checkpoint pertenece al navegador y se mantiene por dirección remota. No hay descubrimiento automático, confirmación de checkpoint remoto ni reintentos en segundo plano. Los nodos deben exponer el puerto 5555 además de la API HTTP.
+
+## Recurrencia y privacidad en los deltas
+
+Los eventos que viajan en el lote `eventos` incluyen `rrule`, `exdates` y `visibilidad`, además de `crdt_data`. Cada uno de estos campos se representa dentro del CRDT como un registro LWW con valor y marca temporal. Al fusionar dos documentos, prevalece el registro con la marca más reciente y los nodos convergen al mismo valor.
+
+`rrule` contiene la regla de recurrencia, `visibilidad` contiene `publico`, `privado` o `solo_invitados`, y `exdates` se trata como una única lista LWW completa: cuando hay conflicto, se reemplaza toda la lista en lugar de combinar elementos uno a uno. Al recibir un delta, el receptor fusiona los registros remotos con el documento local y persiste los valores ganadores en SQLite. De este modo, recurrencia y privacidad sobreviven tanto al transporte por ZeroMQ como a la recuperación o fusión posterior del evento.

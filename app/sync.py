@@ -22,6 +22,16 @@ def _normalizar_delta(cambios: dict) -> dict:
     tombstones = cambios.get("tombstones", [])
     if not isinstance(eventos, list) or not isinstance(tombstones, list):
         raise ValueError("eventos y tombstones deben ser listas")
+    eventos_normalizados = []
+    for evento in eventos:
+        if not isinstance(evento, dict):
+            raise ValueError("cada evento debe ser un objeto JSON")
+        evento_normalizado = dict(evento)
+        evento_normalizado.setdefault("rrule", None)
+        evento_normalizado.setdefault("exdates", [])
+        evento_normalizado.setdefault("visibilidad", "publico")
+        eventos_normalizados.append(evento_normalizado)
+    eventos = eventos_normalizados
     return {"eventos": eventos, "tombstones": tombstones}
 
 

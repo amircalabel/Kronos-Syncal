@@ -169,9 +169,10 @@ def _aplicar_campos(evento: Evento, valores: dict) -> None:
         if campo in valores:
             setattr(evento, campo, valores[campo])
     if "exdates" in valores:
+        exdates = valores["exdates"] or []
         evento.exdates = [
             _sin_zona(_parsear_fecha(fecha)).isoformat()
-            for fecha in valores["exdates"]
+            for fecha in exdates
         ]
     for campo in ("inicio", "fin", "ultima_modificacion"):
         if campo in valores and valores[campo] is not None:
@@ -758,6 +759,9 @@ def aplicar_delta_sync(delta: dict) -> dict:
                         "version",
                         "ultima_modificacion",
                         "calendario_id",
+                        "rrule",
+                        "exdates",
+                        "visibilidad",
                     )
                     if campo in datos
                 }

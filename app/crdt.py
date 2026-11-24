@@ -20,6 +20,9 @@ _CAMPOS_EVENTO = (
     "version",
     "ultima_modificacion",
     "calendario_id",
+    "rrule",
+    "exdates",
+    "visibilidad",
 )
 
 
@@ -84,6 +87,12 @@ def crear_evento_crdt(datos: dict) -> Doc:
             valor = 1
         elif campo == "ultima_modificacion":
             valor = ts
+        elif campo == "rrule":
+            valor = None
+        elif campo == "exdates":
+            valor = []
+        elif campo == "visibilidad":
+            valor = "publico"
         else:
             valor = None
         mapa[campo] = {"value": valor, "ts": ts}
