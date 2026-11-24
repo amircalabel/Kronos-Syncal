@@ -192,7 +192,6 @@ En la carpeta `docs/` se detalla el diseño y las decisiones técnicas del siste
 * **Descubrimiento manual de pares:** los nodos remotos se indican explícitamente al sincronizar (no existe descubrimiento automático P2P).
 * **Interfaz web básica:** el frontend en `static/` cubre las operaciones fundamentales; las vistas avanzadas de invitaciones, recurrencia y modo *offline* en navegador (IndexedDB) forman parte de fases posteriores.
 
-```
 
 ---
 
